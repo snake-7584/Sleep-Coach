@@ -1,6 +1,6 @@
 # Sleep Coach
 
-A hackathon MVP that turns 7 days of sleep data into **sleep debt/credit** and an **AI-generated recovery plan**.  
+
 *The calculator finds the debt — the AI decides the recovery.*
 
 ## Tech
@@ -20,9 +20,6 @@ A hackathon MVP that turns 7 days of sleep data into **sleep debt/credit** and a
 ## Flow
 
 1. **/** — Log last 7 nights (hours per night). Primary CTA: **Analyze My Sleep**.
-2. **/analysis** — Sleep Balance (big number, red/green), Weekly bar chart, AI Recovery Plan (plain language, no diagnoses).
+2. **/analysis** — Sleep Balance (big number, red/green), Weekly bar chart, AI Recovery Plan 
 
-## Rules
 
-- No local models, no paid APIs, no auth, no medical diagnoses.
-- One AI call per analysis; temperature 0.2–0.4; prompt used verbatim per spec.
