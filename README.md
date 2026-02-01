@@ -23,5 +23,8 @@
 2. **/analysis** — Sleep Balance (big number, red/green), Weekly bar chart, AI Recovery Plan 
 
 
+
+
+
 A lot of people (including myself) have trouble maintaining a sleep schedule and having good sleeping habits so I built Sleep Coach. Sleep Coach will take in you hours and create a plan to get you back on track with your sleep and the AI Chatbot will help you with any additional questions you might have.
 I built this using Cursor and OpenCode.
