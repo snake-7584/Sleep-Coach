@@ -1,10 +1,15 @@
 import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
-import { ThemeProvider } from "@/components/theme-provider";
 import { Providers } from "@/components/layout/providers";
 
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-sans",
+});
+
 const APP_NAME = "FinWise";
-const APP_DESCRIPTION = "Track daily spending, stay under budget, and get AI-powered financial coaching.";
+const APP_DESCRIPTION = "Learn personal finance through interactive lessons, quizzes, and challenges.";
 
 export const metadata: Metadata = {
   title: APP_NAME,
@@ -21,7 +26,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#059669",
+  themeColor: "#059673",
   viewportFit: "cover",
   width: "device-width",
   initialScale: 1,
@@ -36,11 +41,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={inter.variable}>
+      <head>
+        <script dangerouslySetInnerHTML={{
+          __html: `
+            try {
+              var stored = JSON.parse(localStorage.getItem('finwise-store') || '{}');
+              if (stored.state && stored.state.isDarkMode) document.documentElement.classList.add('dark');
+            } catch(e) {}
+          `
+        }} />
+      </head>
       <body className="font-sans antialiased">
-        <ThemeProvider>
-          <Providers>{children}</Providers>
-        </ThemeProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
