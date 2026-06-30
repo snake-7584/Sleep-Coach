@@ -1,0 +1,29 @@
+{
+  "type": "Prerender",
+  "expiration": false,
+  "isDynamicRoute": false,
+  "htmlSize": 10798,
+  "group": 2,
+  "bypassToken": "871ec4325656569deb1cb7cea78818b6",
+  "experimentalBypassFor": [
+    {
+      "type": "header",
+      "key": "Next-Action"
+    },
+    {
+      "type": "header",
+      "key": "content-type",
+      "value": "multipart/form-data;.*"
+    }
+  ],
+  "fallback": {
+    "type": "FileFsRef",
+    "mode": 33188,
+    "fsPath": "signin.prerender-fallback.html"
+  },
+  "initialHeaders": {
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/auth/layout,_N_T_/auth/signin/layout,_N_T_/auth/signin/page,_N_T_/auth/signin",
+    "vary": "RSC, Next-Router-State-Tree, Next-Router-Prefetch"
+  },
+  "allowQuery": []
+}

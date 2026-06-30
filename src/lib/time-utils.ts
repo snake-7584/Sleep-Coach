@@ -1,5 +1,5 @@
 /**
- * Parse and compute sleep duration from bedtime and wake time (12hr AM/PM).
+ * Parse and compute time duration from time strings (12hr AM/PM).
  */
 
 /** Parse "11:00 PM", "11pm", "11:30 AM" etc. to minutes since midnight (0–1439). Returns null if invalid. */

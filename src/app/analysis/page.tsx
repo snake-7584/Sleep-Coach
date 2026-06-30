@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import { Moon, Brain, ArrowLeft, MessageCircle } from "lucide-react";
+import { Wallet, Brain, ArrowLeft, MessageCircle, TrendingDown, TrendingUp, DollarSign } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -26,14 +26,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
-  computeSleepBalance,
-  TARGET_SLEEP_HOURS,
+  computeBudgetBalance,
+  DAILY_BUDGET,
   DEFAULT_DAY_LABELS,
-  getTypicalWakeTime,
-  getTypicalBedtime,
-  getDefaultSleepLog,
-  type SleepDay,
-} from "@/lib/sleep-calculator";
+  getDefaultWeek,
+  type DayExpense,
+} from "@/lib/finance-calculator";
 import { STORAGE_KEY, ANALYSIS_STORAGE_KEY, CACHE_CLEARED_KEY } from "@/lib/storage-keys";
 import { addPointsForWeekIfNew } from "@/lib/points";
 import {
@@ -41,45 +39,37 @@ import {
   getPreviousWeeksSummary,
   appendWeek,
 } from "@/lib/week-history";
-import { hoursBetweenBedAndWake } from "@/lib/time-utils";
 
-/** Stored log shape: { days, typicalWake?, typicalBedtime?, targetHours? } */
-type StoredLog = { days: SleepDay[]; typicalWake?: string; typicalBedtime?: string; targetHours?: number };
+type StoredLog = { days: DayExpense[]; budget?: number };
 
-/** Cached analysis shape: plan + points (from AI) + metadata for cache invalidation */
 type CachedAnalysis = {
   plan: string;
   points?: number;
-  debt: number;
-  credit: number;
-  wakeTime: string;
-  bedtime?: string;
-  constraints: string;
-  targetHours?: number;
+  overspend: number;
+  underspend: number;
+  budget?: number;
 };
-
-type BalanceResult = ReturnType<typeof computeSleepBalance>;
 
 type ChatMessage = {
   role: "assistant" | "user";
   content: string;
 };
 
-type SleepTooltipPayload = {
+type BudgetTooltipPayload = {
   value: number;
   name: string;
 };
 
-function SleepTooltip({ active, payload, label }: TooltipProps<number, string>) {
+function BudgetTooltip({ active, payload, label }: TooltipProps<number, string>) {
   if (!active || !payload || payload.length === 0) return null;
-  const point = payload[0] as SleepTooltipPayload | undefined;
+  const point = payload[0] as BudgetTooltipPayload | undefined;
   if (!point || typeof point.value !== "number") return null;
   return (
     <div className="rounded-xl border border-slate-200/80 bg-white/95 px-3.5 py-2 shadow-lg backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/85">
       <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
         {label}
       </p>
-      <p className="text-sm font-semibold text-slate-700 dark:text-slate-100">{point.value} hrs</p>
+      <p className="text-sm font-semibold text-slate-700 dark:text-slate-100">${point.value.toFixed(2)}</p>
     </div>
   );
 }
@@ -95,9 +85,7 @@ function renderChatContent(content: string): ReactNode {
       .map((line) => line.trim())
       .filter(Boolean);
 
-    if (lines.length === 0) {
-      return null;
-    }
+    if (lines.length === 0) return null;
 
     const bulletLines = lines.every((line) => /^[-*•]\s+/.test(line));
     if (bulletLines) {
@@ -140,21 +128,15 @@ function renderChatContent(content: string): ReactNode {
   });
 }
 
-/**
- * Analysis page: shows Sleep Balance, Weekly chart, and AI Recovery Plan.
- * Loads 7-day log from localStorage; calls /api/analyze once (or uses cache).
- */
 export default function AnalysisPage() {
-  const [days, setDays] = useState<SleepDay[]>([]);
-  const [typicalWake, setTypicalWake] = useState<string | undefined>(undefined);
-  const [typicalBedtime, setTypicalBedtime] = useState<string | undefined>(undefined);
+  const [days, setDays] = useState<DayExpense[]>([]);
   const [plan, setPlan] = useState<string | null>(null);
   const [planVisible, setPlanVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [revealSections, setRevealSections] = useState(false);
-  const [targetHours, setTargetHours] = useState<number>(TARGET_SLEEP_HOURS);
+  const [budget, setBudget] = useState<number>(DAILY_BUDGET);
   const [planPoints, setPlanPoints] = useState<number | undefined>(undefined);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -163,57 +145,8 @@ export default function AnalysisPage() {
   const chatListRef = useRef<HTMLDivElement | null>(null);
 
   const balance = useMemo(
-    () => (days.length === 7 ? computeSleepBalance(days, targetHours) : null),
-    [days, targetHours]
-  );
-
-  const { sanitizedDays, timingNote, hasMismatch } = useMemo<{
-    sanitizedDays: BalanceResult["days"];
-    timingNote?: string;
-    hasMismatch: boolean;
-  }>(() => {
-    if (!balance) {
-      return {
-        sanitizedDays: [] as BalanceResult["days"],
-        timingNote: undefined,
-        hasMismatch: false,
-      };
-    }
-
-    const mismatches: string[] = [];
-    const formatList = (values: string[]): string => {
-      if (values.length <= 1) return values[0] ?? "";
-      if (values.length === 2) return `${values[0]} and ${values[1]}`;
-      return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
-    };
-
-    const sanitized = balance.days.map((d) => {
-      if (d.bedtime?.trim() && d.wakeTime?.trim()) {
-        const derived = hoursBetweenBedAndWake(d.bedtime.trim(), d.wakeTime.trim());
-        if (derived !== null && Math.abs(derived - d.hours) > 0.25) {
-          mismatches.push(d.day);
-          return { ...d, bedtime: undefined, wakeTime: undefined };
-        }
-      }
-      return d;
-    }) as BalanceResult["days"];
-
-    const note = mismatches.length
-      ? `Hours override the logged bed/wake times for ${formatList(mismatches)}. Use the recorded hours for accuracy.`
-      : undefined;
-
-    return { sanitizedDays: sanitized, timingNote: note, hasMismatch: mismatches.length > 0 };
-  }, [balance]);
-
-  const chatReadyDays = useMemo(
-    () =>
-      sanitizedDays.map(({ day, hours, debt, credit }) => ({
-        day,
-        hours,
-        debt,
-        credit,
-      })),
-    [sanitizedDays]
+    () => (days.length === 7 ? computeBudgetBalance(days, budget) : null),
+    [days, budget]
   );
 
   useEffect(() => {
@@ -221,7 +154,6 @@ export default function AnalysisPage() {
     chatListRef.current.scrollTo({ top: chatListRef.current.scrollHeight, behavior: "smooth" });
   }, [chatMessages.length]);
 
-  // Load log from localStorage on mount (supports { days, typicalWake } or legacy array)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -229,7 +161,7 @@ export default function AnalysisPage() {
         setMounted(true);
         return;
       }
-      const data = JSON.parse(raw) as SleepDay[] | StoredLog;
+      const data = JSON.parse(raw) as DayExpense[] | StoredLog;
       const parsed = Array.isArray(data) ? data : data.days;
 
       if (!Array.isArray(parsed) || parsed.length !== 7) {
@@ -240,25 +172,16 @@ export default function AnalysisPage() {
       setDays(
         DEFAULT_DAY_LABELS.map((day, i) => ({
           day,
-          hours:
-            typeof parsed[i]?.hours === "number" ? parsed[i].hours : TARGET_SLEEP_HOURS,
-          wakeTime: parsed[i]?.wakeTime,
-          bedtime: parsed[i]?.bedtime,
+          spent: typeof parsed[i]?.spent === "number" ? parsed[i].spent : 0,
+          category: parsed[i]?.category,
+          note: parsed[i]?.note,
         }))
       );
 
-      if (!Array.isArray(data)) {
-        setTypicalWake(data.typicalWake ?? getTypicalWakeTime(parsed as SleepDay[]) ?? undefined);
-        setTypicalBedtime(data.typicalBedtime ?? getTypicalBedtime(parsed as SleepDay[]) ?? undefined);
-        if (typeof data.targetHours === "number") {
-          setTargetHours(Math.min(Math.max(4, data.targetHours), 12));
-        }
-      } else {
-        setTypicalWake(getTypicalWakeTime(parsed as SleepDay[]) ?? undefined);
-        setTypicalBedtime(getTypicalBedtime(parsed as SleepDay[]) ?? undefined);
+      if (!Array.isArray(data) && typeof data.budget === "number") {
+        setBudget(Math.min(Math.max(10, data.budget), 1000));
       }
     } catch {
-      // ignore
     }
     setMounted(true);
   }, []);
@@ -283,21 +206,19 @@ export default function AnalysisPage() {
     if (!plan || !balance) return;
     if (chatMessages.length > 0) return;
     const net = balance.netBalance;
-    const netAbs = Math.abs(net).toFixed(1);
-    const debtPhrase = net < 0 ? `${netAbs} hour${netAbs === "1.0" ? "" : "s"} of sleep debt` : `${netAbs} hour${netAbs === "1.0" ? "" : "s"} of extra rest`;
     const tone =
       net < 0
-        ? `You picked up ${debtPhrase} this week, but we can plan a gentle rebound.`
+        ? `You went $${Math.abs(net).toFixed(2)} over budget this week — let's find ways to balance things out.`
         : net > 0
-          ? `You banked ${debtPhrase} — nice work keeping a steady rhythm.`
-          : "You landed right on target this week, which is a great baseline to build from.";
-    const opener = `Hey, I'm your Sleep Coach. ${tone} Ask me anything about the plan or how to adapt it to your schedule.`;
+          ? `You saved $${net.toFixed(2)} this week — nice work staying disciplined.`
+          : "You landed right on target this week, which is a great baseline.";
+    const opener = `Hey, I'm your FinWise coach. ${tone} Ask me anything about the budget plan or how to adjust your spending habits.`;
     setChatMessages([{ role: "assistant", content: opener }]);
   }, [plan, balance, chatMessages.length]);
 
   const sendChatMessage = async () => {
     if (!plan || !balance) return;
-    if (sanitizedDays.length !== 7) return;
+    if (days.length !== 7) return;
     if (chatLoading) return;
     const trimmed = chatInput.trim();
     if (!trimmed) return;
@@ -315,15 +236,17 @@ export default function AnalysisPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: optimisticMessages,
-          sleepLog: chatReadyDays,
+          expenseLog: balance.days.map(({ day, spent, overspend, underspend }) => ({
+            day, spent, overspend, underspend,
+          })),
           totals: {
-            debt: balance.totalDebt,
-            credit: balance.totalCredit,
+            overspend: balance.totalOverspend,
+            underspend: balance.totalUnderspend,
             net: balance.netBalance,
           },
           plan,
           points: planPoints,
-          timingNote,
+          targetBudget: budget,
         }),
       });
 
@@ -364,104 +287,55 @@ export default function AnalysisPage() {
     }
   };
 
-  // When mounted and we have balance: try cache, else call API once
   useEffect(() => {
     if (!mounted || !balance) return;
 
-    const trimmedWake = typicalWake?.trim() ?? "";
-    const trimmedBed = typicalBedtime?.trim() ?? "";
-    const dailyWakeTimes = sanitizedDays
-      .map((d) => d.wakeTime?.trim())
-      .filter((value): value is string => Boolean(value));
-    const dailyBedTimes = sanitizedDays
-      .map((d) => d.bedtime?.trim())
-      .filter((value): value is string => Boolean(value));
-
-    const wakeHasDaily = dailyWakeTimes.length > 0;
-    const bedHasDaily = dailyBedTimes.length > 0;
-    const wakeSingleValue = new Set(dailyWakeTimes).size <= 1;
-    const bedSingleValue = new Set(dailyBedTimes).size <= 1;
-    const wakeAlignsTypical = !trimmedWake || !wakeHasDaily || dailyWakeTimes.every((t) => t === trimmedWake);
-    const bedAlignsTypical = !trimmedBed || !bedHasDaily || dailyBedTimes.every((t) => t === trimmedBed);
-    const wakeIsConsistent = (!wakeHasDaily && Boolean(trimmedWake)) || (wakeHasDaily && wakeSingleValue && wakeAlignsTypical);
-    const bedIsConsistent = (!bedHasDaily && Boolean(trimmedBed)) || (bedHasDaily && bedSingleValue && bedAlignsTypical);
-
-    const overrideLabel = hasMismatch ? "Hours override logged times" : undefined;
-    const wakeDisplay =
-      overrideLabel ??
-      (wakeHasDaily
-        ? wakeIsConsistent
-          ? dailyWakeTimes[0]
-          : "Varies by day"
-        : trimmedWake || "Not specified");
-    const bedDisplay =
-      overrideLabel ??
-      (bedHasDaily
-        ? bedIsConsistent
-          ? dailyBedTimes[0]
-          : "Varies by day"
-        : trimmedBed || "Not specified");
-    const wakeForRequest = !hasMismatch && wakeIsConsistent ? wakeDisplay : undefined;
-    const bedForRequest = !hasMismatch && bedIsConsistent ? bedDisplay : undefined;
     const history = loadWeekHistory();
     const isFirstWeek = history.length === 0;
     const previousWeeks = getPreviousWeeksSummary(2);
 
-    // Try to use cached analysis if debt/credit match
     try {
       const cachedRaw = localStorage.getItem(ANALYSIS_STORAGE_KEY);
       if (cachedRaw) {
         const cached = JSON.parse(cachedRaw) as CachedAnalysis;
-        const debtMatch = Math.abs((cached.debt ?? 0) - balance.totalDebt) < 0.01;
-        const creditMatch = Math.abs((cached.credit ?? 0) - balance.totalCredit) < 0.01;
-        const targetMatch = Math.abs((cached.targetHours ?? targetHours) - targetHours) < 0.01;
-        if (typeof cached.plan === "string" && debtMatch && creditMatch && targetMatch) {
+        const overspendMatch = Math.abs((cached.overspend ?? 0) - balance.totalOverspend) < 0.01;
+        const underspendMatch = Math.abs((cached.underspend ?? 0) - balance.totalUnderspend) < 0.01;
+        const budgetMatch = Math.abs((cached.budget ?? budget) - budget) < 0.01;
+        if (typeof cached.plan === "string" && overspendMatch && underspendMatch && budgetMatch) {
           setPlan(cached.plan);
           setPlanPoints(typeof cached.points === "number" ? cached.points : undefined);
           setChatMessages([]);
           setChatError(null);
-          addPointsForWeekIfNew(sanitizedDays, cached.points, balance.totalDebt, targetHours);
+          addPointsForWeekIfNew(balance.days, cached.points, budget);
           try {
             localStorage.setItem(
               STORAGE_KEY,
-              JSON.stringify({ days: getDefaultSleepLog(), targetHours })
+              JSON.stringify({ days: getDefaultWeek(), budget })
             );
             localStorage.setItem(CACHE_CLEARED_KEY, "1");
           } catch {
-            // ignore
           }
           return;
         }
       }
     } catch {
-      // ignore
     }
 
-    // No cache hit: call API once
     if (plan !== null || loading || error) return;
 
     setLoading(true);
     setError(null);
 
     const payload: Record<string, unknown> = {
-      sleepLog: sanitizedDays,
-      debt: balance.totalDebt,
-      credit: balance.totalCredit,
-      constraints: "Work/school weekdays; flexible on weekends",
+      expenseLog: balance.days.map(({ day, spent, category, note }) => ({
+        day, spent, category, note,
+      })),
+      overspend: balance.totalOverspend,
+      underspend: balance.totalUnderspend,
       isFirstWeek,
       previousWeeks,
-      targetHours,
+      budget,
     };
-
-    if (wakeForRequest && wakeForRequest !== "Not specified") {
-      payload.wakeTime = wakeForRequest;
-    }
-    if (bedForRequest && bedForRequest !== "Not specified") {
-      payload.bedtime = bedForRequest;
-    }
-    if (timingNote) {
-      payload.timingNote = timingNote;
-    }
 
     fetch("/api/analyze", {
       method: "POST",
@@ -491,33 +365,27 @@ export default function AnalysisPage() {
             JSON.stringify({
               plan: planText,
               points: pointsFromAI,
-              debt: balance.totalDebt,
-              credit: balance.totalCredit,
-              wakeTime: wakeDisplay,
-              bedtime: bedDisplay,
-              constraints: "Work/school weekdays; flexible on weekends",
-              targetHours,
+              overspend: balance.totalOverspend,
+              underspend: balance.totalUnderspend,
+              budget,
             } as CachedAnalysis)
           );
-          addPointsForWeekIfNew(sanitizedDays, pointsFromAI, balance.totalDebt, targetHours);
+          addPointsForWeekIfNew(balance.days, pointsFromAI, budget);
           appendWeek({
-            days: sanitizedDays,
-            totalDebt: balance.totalDebt,
-            totalCredit: balance.totalCredit,
+            days: balance.days,
+            totalOverspend: balance.totalOverspend,
+            totalUnderspend: balance.totalUnderspend,
             netBalance: balance.netBalance,
             plan: planText,
             points: pointsFromAI ?? 0,
-            typicalWake: wakeDisplay,
-            typicalBedtime: bedDisplay,
-            targetHours,
+            targetBudget: budget,
           });
           localStorage.setItem(
             STORAGE_KEY,
-            JSON.stringify({ days: getDefaultSleepLog(), targetHours })
+            JSON.stringify({ days: getDefaultWeek(), budget })
           );
           localStorage.setItem(CACHE_CLEARED_KEY, "1");
         } catch {
-          // ignore
         }
       })
       .catch((e: { error?: string; details?: string } | Error) => {
@@ -530,7 +398,7 @@ export default function AnalysisPage() {
         setError(msg);
       })
       .finally(() => setLoading(false));
-  }, [mounted, balance, plan, loading, error, typicalWake, typicalBedtime, sanitizedDays, timingNote, hasMismatch, targetHours]);
+  }, [mounted, balance, plan, loading, error, budget]);
 
   const showChat = Boolean(plan && !loading);
   const chatDisabled = chatLoading || chatInput.trim().length === 0;
@@ -539,24 +407,22 @@ export default function AnalysisPage() {
     () =>
       balance?.days.map((d) => ({
         day: d.day,
-        hours: d.hours,
+        spent: d.spent,
       })) ?? [],
     [balance]
   );
   const chartYMax = useMemo(() => {
-    const values = chartData.map((d) => d.hours);
-    const maxHours = values.length > 0 ? Math.max(...values, targetHours + 2) : targetHours + 2;
-    return Math.max(10, Math.ceil(maxHours + 1));
-  }, [chartData, targetHours]);
+    const values = chartData.map((d) => d.spent);
+    const maxSpent = values.length > 0 ? Math.max(...values, budget + 20) : budget + 20;
+    return Math.max(50, Math.ceil(maxSpent / 10) * 10 + 10);
+  }, [chartData, budget]);
 
   const sectionClass = (extra?: string) =>
     ["reveal-section", revealSections ? "reveal-active" : "", extra].filter(Boolean).join(" ");
 
   const sectionDelay = (index: number): CSSProperties => ({ transitionDelay: `${index * 90}ms` });
-
   const planDelay = (index: number): CSSProperties => ({ transitionDelay: `${index * 70 + 260}ms` });
 
-  // Loading state (before hydration / storage read)
   if (!mounted) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-900">
@@ -565,12 +431,11 @@ export default function AnalysisPage() {
     );
   }
 
-  // No data: redirect user to dashboard
   if (days.length !== 7) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50 px-4 dark:bg-slate-900">
         <p className="text-slate-600 dark:text-slate-400">
-          No sleep data. Log your last 7 nights first.
+          No spending data. Log your last 7 days first.
         </p>
         <Link href="/">
           <Button>Go to Dashboard</Button>
@@ -580,8 +445,8 @@ export default function AnalysisPage() {
   }
 
   const netBalance = balance!.netBalance;
-  const isDebt = netBalance < 0;
-  const balanceLabel = `${isDebt ? "" : "+"}${netBalance.toFixed(1)} hrs`;
+  const isOverspent = netBalance < 0;
+  const balanceLabel = `${isOverspent ? "-$" : "+$"}${Math.abs(netBalance).toFixed(2)}`;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-50 to-slate-100 transition-colors dark:from-slate-900 dark:via-slate-900 dark:to-slate-800">
@@ -598,29 +463,28 @@ export default function AnalysisPage() {
             Back to Dashboard
           </Link>
           <div className="flex items-center gap-3">
-            <div className="inline-flex items-center gap-3 rounded-full bg-gradient-to-r from-amber-100 to-amber-50 px-4 py-2 shadow-md dark:from-amber-900/40 dark:to-amber-800/20 dark:shadow-lg">
-              <Moon className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-              <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">Sleep Coach</span>
+            <div className="inline-flex items-center gap-3 rounded-full bg-gradient-to-r from-emerald-100 to-emerald-50 px-4 py-2 shadow-md dark:from-emerald-900/40 dark:to-emerald-800/20 dark:shadow-lg">
+              <Wallet className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">FinWise</span>
             </div>
             <ThemeToggle />
           </div>
         </header>
 
-        {/* 1. Sleep Balance — computed totals; color by debt vs credit */}
         <Card
           className={sectionClass(
-            `mb-10 rounded-3xl shadow-xl transition-all duration-300 ${isDebt ? 'border-red-200/60 dark:border-red-800/60' : 'border-emerald-200/60 dark:border-emerald-800/60'}`
+            `mb-10 rounded-3xl shadow-xl transition-all duration-300 ${isOverspent ? 'border-red-200/60 dark:border-red-800/60' : 'border-emerald-200/60 dark:border-emerald-800/60'}`
           )}
           style={sectionDelay(1)}
         >
           <CardHeader className="pb-6">
             <div className="flex items-center gap-4">
-              <div className={`rounded-full p-3 ${isDebt ? 'bg-red-100 dark:bg-red-800/30' : 'bg-emerald-100 dark:bg-emerald-800/30'}`}>
-                <Moon className={`h-6 w-6 ${isDebt ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
+              <div className={`rounded-full p-3 ${isOverspent ? 'bg-red-100 dark:bg-red-800/30' : 'bg-emerald-100 dark:bg-emerald-800/30'}`}>
+                <Wallet className={`h-6 w-6 ${isOverspent ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
               </div>
               <div>
-                <CardTitle className="text-xl">Sleep Balance</CardTitle>
-                <CardDescription className="text-base mt-1">Net over the last 7 days (credit − debt)</CardDescription>
+                <CardTitle className="text-xl">Budget Balance</CardTitle>
+                <CardDescription className="text-base mt-1">Net over the last 7 days (underspend − overspend)</CardDescription>
               </div>
             </div>
           </CardHeader>
@@ -628,26 +492,31 @@ export default function AnalysisPage() {
             <div className="space-y-4">
               <p
                 className={`text-5xl font-bold tracking-tight sm:text-6xl ${
-                  isDebt ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"
+                  isOverspent ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"
                 }`}
               >
                 {balanceLabel}
               </p>
               <div className="flex gap-8 text-base">
                 <div className="text-center">
-                  <div className="text-lg font-semibold text-red-600 dark:text-red-400">{balance!.totalDebt.toFixed(1)}</div>
-                  <div className="text-sm text-slate-600 dark:text-slate-400">Debt hrs</div>
+                  <div className="flex items-center gap-1 text-lg font-semibold text-red-600 dark:text-red-400">
+                    <TrendingDown className="h-4 w-4" />
+                    ${balance!.totalOverspend.toFixed(2)}
+                  </div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Overspend</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">{balance!.totalCredit.toFixed(1)}</div>
-                  <div className="text-sm text-slate-600 dark:text-slate-400">Credit hrs</div>
+                  <div className="flex items-center gap-1 text-lg font-semibold text-emerald-600 dark:text-emerald-400">
+                    <TrendingUp className="h-4 w-4" />
+                    ${balance!.totalUnderspend.toFixed(2)}
+                  </div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Underspend</div>
                 </div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* 2. Weekly Sleep — Recharts bar chart, 8hr reference line */}
         <Card
           className={sectionClass("mb-10 rounded-3xl shadow-xl transition-all duration-300")}
           style={sectionDelay(2)}
@@ -655,12 +524,12 @@ export default function AnalysisPage() {
           <CardHeader className="pb-6">
             <div className="flex items-center gap-4">
               <div className="rounded-full bg-slate-100 p-3 dark:bg-slate-700">
-                <Moon className="h-6 w-6 text-slate-600 dark:text-slate-300" />
+                <DollarSign className="h-6 w-6 text-slate-600 dark:text-slate-300" />
               </div>
               <div>
-                <CardTitle className="text-xl">Weekly Sleep</CardTitle>
+                <CardTitle className="text-xl">Weekly Spending</CardTitle>
                 <CardDescription className="text-base mt-1">
-                  Hours per night (goal {targetHours} hrs)
+                  Daily spending (goal ${budget}/day)
                 </CardDescription>
               </div>
             </div>
@@ -680,24 +549,25 @@ export default function AnalysisPage() {
                     axisLine={false}
                     tickLine={false}
                     tick={{ fill: "#64748b", fontSize: 13 }}
-                    width={32}
+                    width={40}
+                    tickFormatter={(v: number) => `$${v}`}
                   />
-                                  <ReferenceLine
-                                    y={targetHours}
-                                    stroke="#94a3b8"
-                                    strokeDasharray="4 4"
-                                    strokeWidth={1.5}
-                                  />
-                                  <Tooltip
-                                    cursor={{ fill: "rgba(148, 163, 184, 0.18)", radius: 12 }}
-                                    wrapperStyle={{ margin: 0 }}
-                                    content={<SleepTooltip />}
-                                  />
+                  <ReferenceLine
+                    y={budget}
+                    stroke="#94a3b8"
+                    strokeDasharray="4 4"
+                    strokeWidth={1.5}
+                  />
+                  <Tooltip
+                    cursor={{ fill: "rgba(148, 163, 184, 0.18)", radius: 12 }}
+                    wrapperStyle={{ margin: 0 }}
+                    content={<BudgetTooltip />}
+                  />
                   <Bar
-                    dataKey="hours"
-                    fill="#475569"
+                    dataKey="spent"
+                    fill="#059669"
                     radius={[8, 8, 0, 0]}
-                    name="Hours"
+                    name="Spent"
                     className="dark:opacity-90"
                   />
                 </BarChart>
@@ -706,32 +576,31 @@ export default function AnalysisPage() {
           </CardContent>
         </Card>
 
-        {/* 3. AI Recovery Plan — coach speaks directly to user */}
         <Card
           className={sectionClass(
-            "rounded-3xl bg-gradient-to-r from-amber-50/80 to-amber-100/60 shadow-xl transition-all duration-300 dark:from-amber-900/20 dark:to-amber-800/10 dark:border-amber-800/40"
+            "rounded-3xl bg-gradient-to-r from-emerald-50/80 to-emerald-100/60 shadow-xl transition-all duration-300 dark:from-emerald-900/20 dark:to-emerald-800/10 dark:border-emerald-800/40"
           )}
           style={sectionDelay(3)}
         >
           <CardHeader className="pb-6">
             <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-amber-200 to-amber-100 shadow-lg dark:from-amber-800 dark:to-amber-700">
-                <Brain className="h-6 w-6 text-amber-700 dark:text-amber-300" />
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-emerald-200 to-emerald-100 shadow-lg dark:from-emerald-800 dark:to-emerald-700">
+                <Brain className="h-6 w-6 text-emerald-700 dark:text-emerald-300" />
               </div>
               <div>
                 <CardTitle className="text-xl">Your AI Coach Says</CardTitle>
                 <CardDescription className="text-base mt-1">
-                  Personalized for you—no medical advice, just support.
+                  Personalized for you—not financial advice, just support.
                 </CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="px-6">
             {loading && (
-              <div className="flex items-center gap-3 text-amber-700 dark:text-amber-300">
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-amber-300 border-t-amber-600"></div>
+              <div className="flex items-center gap-3 text-emerald-700 dark:text-emerald-300">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-300 border-t-emerald-600"></div>
                 <p className="text-base">
-                  Your coach is reading your sleep data and writing a plan for you…
+                  Your coach is reading your spending data and creating a plan…
                 </p>
               </div>
             )}
@@ -771,8 +640,8 @@ export default function AnalysisPage() {
           >
             <CardHeader className="pb-6">
               <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-amber-200 to-amber-100 shadow-lg dark:from-amber-800 dark:to-amber-700">
-                  <MessageCircle className="h-6 w-6 text-amber-700 dark:text-amber-300" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-emerald-200 to-emerald-100 shadow-lg dark:from-emerald-800 dark:to-emerald-700">
+                  <MessageCircle className="h-6 w-6 text-emerald-700 dark:text-emerald-300" />
                 </div>
                 <div>
                   <CardTitle className="text-xl">Chat with Your Coach</CardTitle>
@@ -795,8 +664,8 @@ export default function AnalysisPage() {
                         <div
                           className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-md transition-all duration-200 ${
                             isUser
-                              ? "bg-gradient-to-r from-amber-500 to-amber-400 text-amber-50"
-                              : "bg-white/80 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200 border border-amber-100/60 dark:border-amber-800/40"
+                              ? "bg-gradient-to-r from-emerald-500 to-emerald-400 text-emerald-50"
+                              : "bg-white/80 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200 border border-emerald-100/60 dark:border-emerald-800/40"
                           }`}
                         >
                           <div className="space-y-2 text-left">
@@ -809,7 +678,7 @@ export default function AnalysisPage() {
                   {chatLoading && (
                     <div className="flex justify-start">
                       <div className="flex items-center gap-2 rounded-2xl bg-white/70 px-4 py-3 text-sm text-slate-600 shadow-md dark:bg-slate-800/70 dark:text-slate-300">
-                        <span className="h-2.5 w-2.5 animate-ping rounded-full bg-amber-500"></span>
+                        <span className="h-2.5 w-2.5 animate-ping rounded-full bg-emerald-500"></span>
                         <span>Coach is typing…</span>
                       </div>
                     </div>
@@ -835,13 +704,13 @@ export default function AnalysisPage() {
                   onChange={(event) => setChatInput(event.target.value)}
                   onKeyDown={handleChatKeyDown}
                   placeholder="Ask a follow-up or request tweaks…"
-                  className="min-h-[3.5rem] flex-1 resize-none rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-700 shadow-inner transition-all duration-200 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300/50 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:focus:border-amber-500"
+                  className="min-h-[3.5rem] flex-1 resize-none rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-700 shadow-inner transition-all duration-200 focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-300/50 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:focus:border-emerald-500"
                   rows={3}
                 />
                 <Button
                   type="submit"
                   disabled={chatDisabled}
-                  className="h-12 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 px-6 font-semibold text-slate-900 shadow-lg transition-all duration-200 hover:shadow-xl disabled:opacity-60 disabled:shadow-none"
+                  className="h-12 rounded-2xl bg-gradient-to-r from-emerald-400 to-emerald-500 px-6 font-semibold text-slate-900 shadow-lg transition-all duration-200 hover:shadow-xl disabled:opacity-60 disabled:shadow-none"
                 >
                   {chatLoading ? "Sending…" : "Send"}
                 </Button>

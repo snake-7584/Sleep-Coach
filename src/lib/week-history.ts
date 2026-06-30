@@ -1,22 +1,15 @@
-/**
- * Week history: past analysis snapshots for "view previous weeks" and AI context.
- * Only call something "typical" when we have more than one week (don't assume from one occurrence).
- */
-
 import { WEEKS_HISTORY_KEY } from "./storage-keys";
-import type { SleepDay } from "./sleep-calculator";
+import type { DayExpense } from "./finance-calculator";
 
 export type WeekEntry = {
   createdAt: string;
-  days: SleepDay[];
-  totalDebt: number;
-  totalCredit: number;
+  days: DayExpense[];
+  totalOverspend: number;
+  totalUnderspend: number;
   netBalance: number;
   plan: string;
   points: number;
-  typicalWake?: string;
-  typicalBedtime?: string;
-  targetHours?: number;
+  targetBudget?: number;
 };
 
 const MAX_WEEKS = 20;
@@ -33,8 +26,8 @@ function loadRaw(): WeekEntry[] {
         typeof e === "object" &&
         typeof e.createdAt === "string" &&
         Array.isArray(e.days) &&
-        typeof e.totalDebt === "number" &&
-        typeof e.totalCredit === "number" &&
+        typeof e.totalOverspend === "number" &&
+        typeof e.totalUnderspend === "number" &&
         typeof e.plan === "string"
     );
   } catch {
@@ -53,21 +46,18 @@ export function appendWeek(entry: Omit<WeekEntry, "createdAt">): void {
     const next = [withDate, ...list].slice(0, MAX_WEEKS);
     localStorage.setItem(WEEKS_HISTORY_KEY, JSON.stringify(next));
   } catch {
-    // ignore
   }
 }
 
-/** Summary for API: last N weeks (debt, credit, points) so AI can build on previous. */
-export function getPreviousWeeksSummary(count: number = 2): { debt: number; credit: number; points: number }[] {
+export function getPreviousWeeksSummary(count: number = 2): { overspend: number; underspend: number; points: number }[] {
   return loadRaw()
     .slice(0, count)
-    .map((e) => ({ debt: e.totalDebt, credit: e.totalCredit, points: e.points }));
+    .map((e) => ({ overspend: e.totalOverspend, underspend: e.totalUnderspend, points: e.points }));
 }
 
 export function clearWeekHistory(): void {
   try {
     localStorage.removeItem(WEEKS_HISTORY_KEY);
   } catch {
-    // ignore
   }
 }

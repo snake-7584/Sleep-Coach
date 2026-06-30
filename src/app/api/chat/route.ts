@@ -9,49 +9,47 @@ type ChatMessage = {
   content: string;
 };
 
-type SleepLogDay = {
+type ExpenseLogDay = {
   day: string;
-  hours: number;
-  debt?: number;
-  credit?: number;
+  spent: number;
+  overspend?: number;
+  underspend?: number;
 };
 
 type ChatRequestBody = {
   messages: ChatMessage[];
-  sleepLog: SleepLogDay[];
+  expenseLog: ExpenseLogDay[];
   totals?: {
-    debt: number;
-    credit: number;
+    overspend: number;
+    underspend: number;
     net: number;
   };
   plan?: string;
   points?: number;
-  timingNote?: string;
-  targetHours?: number;
+  targetBudget?: number;
 };
 
-const SYSTEM_PROMPT = `You are the user's sleep behavior coach. Stay supportive, warm, and practical. Reference the provided sleep data and plan when giving advice. Do not contradict earlier guidance unless you explain why you're updating it. Keep answers under 170 words, use short paragraphs or bullet lists, and never fabricate medical expertise.`;
+const SYSTEM_PROMPT = `You are the user's financial behavior coach. Stay supportive, warm, and practical. Reference the provided spending data and budget plan when giving advice. Do not contradict earlier guidance unless you explain why you're updating it. Keep answers under 170 words, use short paragraphs or bullet lists, and never fabricate financial expertise.`;
 
 function buildContext(body: ChatRequestBody): string {
-  const { sleepLog = [], totals, plan, points, timingNote, targetHours } = body;
-  const logLines = sleepLog
+  const { expenseLog = [], totals, plan, points, targetBudget } = body;
+  const logLines = expenseLog
     .map((d) => {
-      const debtPart = typeof d.debt === "number" ? `, debt ${d.debt.toFixed(1)}h` : "";
-      const creditPart = typeof d.credit === "number" ? `, credit ${d.credit.toFixed(1)}h` : "";
-      return `${d.day}: ${d.hours}h${debtPart}${creditPart}`;
+      const overspendPart = typeof d.overspend === "number" ? `, overspend $${d.overspend.toFixed(2)}` : "";
+      const underspendPart = typeof d.underspend === "number" ? `, underspend $${d.underspend.toFixed(2)}` : "";
+      return `${d.day}: $${d.spent.toFixed(2)}${overspendPart}${underspendPart}`;
     })
     .join("\n");
 
   const totalsLine = totals
-    ? `Totals — debt ${totals.debt.toFixed(1)}h, credit ${totals.credit.toFixed(1)}h, net ${totals.net.toFixed(1)}h.`
+    ? `Totals — overspend $${totals.overspend.toFixed(2)}, underspend $${totals.underspend.toFixed(2)}, net $${totals.net.toFixed(2)}.`
     : "";
 
   const pointsLine = typeof points === "number" ? `Coach points for the week: ${points}.` : "";
-  const targetLine = typeof targetHours === "number" ? `Sleep target: ${targetHours} hrs/night.` : "";
-  const planLine = plan ? `Latest plan summary:\n${plan}` : "";
-  const timingLine = timingNote ? `Timing note: ${timingNote}` : "";
+  const budgetLine = typeof targetBudget === "number" ? `Daily budget: $${targetBudget}.` : "";
+  const planLine = plan ? `Latest budget plan:\n${plan}` : "";
 
-  return [`Sleep log:\n${logLines}`, totalsLine, pointsLine, targetLine, planLine, timingLine]
+  return [`Spending log:\n${logLines}`, totalsLine, pointsLine, budgetLine, planLine]
     .filter(Boolean)
     .join("\n\n");
 }

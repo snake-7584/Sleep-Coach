@@ -1,0 +1,254 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String?
+  email         String?  @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  username      String?  @unique
+  displayName   String?
+  bio           String?
+  level         Int      @default(1)
+  xp            Int      @default(0)
+  coins         Int      @default(0)
+  hearts        Int      @default(5)
+  maxHearts     Int      @default(5)
+  streakCount   Int      @default(0)
+  lastActivity  DateTime?
+  currency      String  @default("USD")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  accounts     Account[]
+  sessions     Session[]
+  progress     UserProgress[]
+  achievements UserAchievement[]
+  quizResults  QuizResult[]
+  challengeProgress ChallengeProgress[]
+
+  role String @default("user")
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Module {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  icon        String
+  color       String
+  order       Int
+  xpReward    Int      @default(50)
+  coinReward  Int      @default(10)
+  published   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lessons Lesson[]
+
+  @@map("modules")
+}
+
+model Lesson {
+  id            String   @id @default(cuid())
+  moduleId      String
+  title         String
+  description   String?
+  content       String?
+  order         Int
+  xpReward      Int      @default(20)
+  coinReward    Int      @default(5)
+  requiredXp    Int      @default(0)
+  lessonType    String   @default("multiple_choice")
+  published     Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  module   Module          @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  progress UserProgress[]
+
+  @@map("lessons")
+}
+
+model UserProgress {
+  id        String   @id @default(cuid())
+  userId    String
+  lessonId  String
+  currency  String   @default("USD")
+  completed Boolean  @default(false)
+  score     Int      @default(0)
+  xpEarned  Int      @default(0)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId, currency])
+  @@map("user_progress")
+}
+
+model Achievement {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  title       String
+  description String
+  icon        String
+  xpReward    Int      @default(100)
+  coinReward  Int      @default(20)
+  criteria    String?
+  createdAt   DateTime @default(now())
+
+  userAchievements UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+model QuizResult {
+  id        String   @id @default(cuid())
+  userId    String
+  lessonId  String
+  currency  String   @default("USD")
+  score     Int
+  maxScore  Int
+  answers   String?
+  completed Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@map("quiz_results")
+}
+
+model DailyChallenge {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  type        String
+  target      Int
+  xpReward    Int      @default(50)
+  coinReward  Int      @default(10)
+  active      Boolean  @default(true)
+  date        DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  progress ChallengeProgress[]
+
+  @@map("daily_challenges")
+}
+
+model ChallengeProgress {
+  id          String   @id @default(cuid())
+  userId      String
+  challengeId String
+  progress    Int      @default(0)
+  completed   Boolean  @default(false)
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge DailyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, challengeId])
+  @@map("challenge_progress")
+}
+
+model LeaderboardEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  score     Int
+  period    String   @default("weekly")
+  rank      Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, period])
+  @@map("leaderboard_entries")
+}
+
+model StoreItem {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  type        String
+  price       Int
+  imageUrl    String?
+  available   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@map("store_items")
+}
+
+model UserStoreItem {
+  id        String   @id @default(cuid())
+  userId    String
+  itemId    String
+  equipped  Boolean  @default(false)
+  purchasedAt DateTime @default(now())
+
+  @@unique([userId, itemId])
+  @@map("user_store_items")
+}

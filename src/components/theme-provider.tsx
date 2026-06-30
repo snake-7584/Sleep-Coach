@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 
-const THEME_KEY = "sleep-coach-theme";
+const THEME_KEY = "finwise-theme";
 type Theme = "light" | "dark";
 
 type ThemeContextValue = {

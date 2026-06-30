@@ -8,9 +8,9 @@
   --foreground: 222 47% 11%;
   --card: 0 0% 100%;
   --muted: 220 14% 96%;
-  --accent: 38 92% 50%;
+  --accent: 160 84% 39%;
   --border: 220 13% 91%;
-  --ring: 38 92% 50%;
+  --ring: 160 84% 39%;
 }
 
 /* Dark theme: applied when .dark is on <html> */
@@ -19,9 +19,9 @@
   --foreground: 210 20% 98%;
   --card: 217 33% 17%;
   --muted: 215 28% 17%;
-  --accent: 38 92% 50%;
+  --accent: 160 84% 39%;
   --border: 217 33% 17%;
-  --ring: 38 92% 50%;
+  --ring: 160 84% 39%;
 }
 
 body {

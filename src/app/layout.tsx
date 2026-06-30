@@ -1,13 +1,35 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { Providers } from "@/components/layout/providers";
+
+const APP_NAME = "FinWise";
+const APP_DESCRIPTION = "Track daily spending, stay under budget, and get AI-powered financial coaching.";
 
 export const metadata: Metadata = {
-  title: "Sleep Coach",
-  description: "Turn sleep data into sleep debt and a personalized AI recovery plan.",
+  title: APP_NAME,
+  description: APP_DESCRIPTION,
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: APP_NAME,
+  },
+  manifest: "/manifest.json",
+  icons: {
+    icon: "/icons/icon.svg",
+  },
 };
 
-/** Root layout: theme provider wraps all pages for light/dark mode. */
+export const viewport: Viewport = {
+  themeColor: "#059669",
+  viewportFit: "cover",
+  width: "device-width",
+  initialScale: 1,
+  minimumScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -16,7 +38,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="font-sans antialiased">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <Providers>{children}</Providers>
+        </ThemeProvider>
       </body>
     </html>
   );

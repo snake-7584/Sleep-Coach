@@ -14,7 +14,7 @@ import {
   Settings,
   Trash2,
   ArrowLeft,
-  Moon,
+  Wallet,
   ChevronDown,
   ChevronUp,
   Calendar,
@@ -39,10 +39,8 @@ import {
   CACHE_CLEARED_KEY,
 } from "@/lib/storage-keys";
 import { loadWeekHistory, clearWeekHistory, type WeekEntry } from "@/lib/week-history";
-import { TARGET_SLEEP_HOURS } from "@/lib/sleep-calculator";
+import { DAILY_BUDGET } from "@/lib/finance-calculator";
 import type { TooltipProps } from "recharts";
-
-/** Settings page: explain points, view previous weeks, clear cache. */
 
 type ChatMessage = {
   role: "assistant" | "user";
@@ -72,9 +70,7 @@ function renderChatContent(content: string) {
       .map((line) => line.trim())
       .filter(Boolean);
 
-    if (lines.length === 0) {
-      return null;
-    }
+    if (lines.length === 0) return null;
 
     const bulletLines = lines.every((line) => /^[-*•]\s+/.test(line));
     if (bulletLines) {
@@ -117,7 +113,7 @@ function renderChatContent(content: string) {
   });
 }
 
-function WeekSleepTooltip({ active, payload, label }: TooltipProps<number, string>) {
+function WeekBudgetTooltip({ active, payload, label }: TooltipProps<number, string>) {
   if (!active || !payload || payload.length === 0) return null;
   const point = payload[0] as WeekTooltipPayload | undefined;
   if (!point || typeof point.value !== "number") return null;
@@ -126,7 +122,7 @@ function WeekSleepTooltip({ active, payload, label }: TooltipProps<number, strin
       <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
         {label}
       </p>
-      <p className="text-sm font-semibold text-slate-700 dark:text-slate-100">{point.value} hrs</p>
+      <p className="text-sm font-semibold text-slate-700 dark:text-slate-100">${point.value.toFixed(2)}</p>
     </div>
   );
 }
@@ -160,7 +156,7 @@ export default function SettingsPage() {
         day: "numeric",
         year: "numeric",
       });
-      const greeting = `Hey, I'm your Sleep Coach. This snapshot from ${dateLabel} earned ${week.points} point${week.points === 1 ? "" : "s"}. Want to revisit what worked or what to adjust?`;
+      const greeting = `Hey, I'm your FinWise coach. This snapshot from ${dateLabel} earned ${week.points} point${week.points === 1 ? "" : "s"}. Want to revisit what worked or what to adjust?`;
       return {
         ...prev,
         [expandedId]: {
@@ -191,13 +187,7 @@ export default function SettingsPage() {
     setChatByWeek((prev) => {
       const current = prev[id];
       if (!current) return prev;
-      return {
-        ...prev,
-        [id]: {
-          ...current,
-          input: value,
-        },
-      };
+      return { ...prev, [id]: { ...current, input: value } };
     });
   };
 
@@ -213,13 +203,7 @@ export default function SettingsPage() {
     const optimisticMessages: ChatMessage[] = [...chatState.messages, { role: "user", content: trimmed }];
     setChatByWeek((prev) => ({
       ...prev,
-      [id]: {
-        ...chatState,
-        messages: optimisticMessages,
-        input: "",
-        loading: true,
-        error: null,
-      },
+      [id]: { ...chatState, messages: optimisticMessages, input: "", loading: true, error: null },
     }));
 
     try {
@@ -229,16 +213,15 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: optimisticMessages,
-          sleepLog: week.days,
+          expenseLog: week.days,
           totals: {
-            debt: week.totalDebt,
-            credit: week.totalCredit,
+            overspend: week.totalOverspend,
+            underspend: week.totalUnderspend,
             net: week.netBalance,
           },
           plan: week.plan,
           points: week.points,
-          totalDebt: week.totalDebt,
-          timingNote: undefined,
+          totalOverspend: week.totalOverspend,
         }),
       });
 
@@ -263,12 +246,7 @@ export default function SettingsPage() {
 
       setChatByWeek((prev) => {
         const current = prev[id];
-        const baseState = current ?? {
-          messages: optimisticMessages,
-          input: "",
-          loading: false,
-          error: null,
-        };
+        const baseState = current ?? { messages: optimisticMessages, input: "", loading: false, error: null };
         return {
           ...prev,
           [id]: {
@@ -281,21 +259,11 @@ export default function SettingsPage() {
         };
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Coach chat failed. Please try again.";
+      const message = error instanceof Error ? error.message : "Coach chat failed. Please try again.";
       setChatByWeek((prev) => {
         const current = prev[id];
         if (!current) return prev;
-        return {
-          ...prev,
-          [id]: {
-            ...current,
-            messages: optimisticMessages,
-            loading: false,
-            error: message,
-            input: trimmed,
-          },
-        };
+        return { ...prev, [id]: { ...current, messages: optimisticMessages, loading: false, error: message, input: trimmed } };
       });
     }
   };
@@ -320,7 +288,6 @@ export default function SettingsPage() {
       setExpandedId(null);
       router.push("/");
     } catch {
-      // ignore
     }
   };
 
@@ -344,9 +311,9 @@ export default function SettingsPage() {
             Back
           </Link>
           <div className="flex items-center gap-2">
-            <div className="inline-flex items-center gap-2 rounded-2xl bg-amber-100 px-3 py-1.5 dark:bg-amber-900/30">
-              <Moon className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-              <span className="text-sm font-medium text-amber-800 dark:text-amber-200">Sleep Coach</span>
+            <div className="inline-flex items-center gap-2 rounded-2xl bg-emerald-100 px-3 py-1.5 dark:bg-emerald-900/30">
+              <Wallet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-sm font-medium text-emerald-800 dark:text-emerald-200">FinWise</span>
             </div>
             <ThemeToggle />
           </div>
@@ -356,7 +323,7 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="text-slate-900 dark:text-slate-100">Points & rewards</CardTitle>
             <CardDescription className="text-slate-600 dark:text-slate-400">
-              <strong>This week</strong> is the credit (0–10) your AI coach gave for your last analysis. It updates when you run &quot;Analyze My Sleep&quot; and matches the current 7-day log.
+              <strong>This week</strong> is the credit (0–10) your AI coach gave for your last budget analysis. It updates when you run &quot;Analyze My Budget&quot; and matches the current 7-day log.
               <br />
               <strong>All time</strong> is the total points you&apos;ve earned over time; it adds this week&apos;s credit each time you get a new analysis (once per unique week).
               <br />
@@ -372,13 +339,13 @@ export default function SettingsPage() {
               <CardTitle>Previous weeks</CardTitle>
             </div>
             <CardDescription>
-              Past analysis snapshots. Newest first. Expand to see the coach&apos;s plan for that week.
+              Past analysis snapshots. Newest first. Expand to see the coach&apos;s budget plan for that week.
             </CardDescription>
           </CardHeader>
           <CardContent>
             {weeks.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                No previous weeks yet. Run &quot;Analyze My Sleep&quot; to add entries.
+                No previous weeks yet. Run &quot;Analyze My Budget&quot; to add entries.
               </p>
             ) : (
               <ul className="space-y-2">
@@ -392,14 +359,11 @@ export default function SettingsPage() {
                     year: "numeric",
                   });
                   const balanceStr =
-                    w.netBalance >= 0 ? `+${w.netBalance.toFixed(1)}` : w.netBalance.toFixed(1);
-                  const targetLine = w.targetHours ?? TARGET_SLEEP_HOURS;
-                  const targetDisplay = Number.isInteger(targetLine)
-                    ? targetLine.toString()
-                    : targetLine.toFixed(1);
-                  const chartData = w.days.map((d) => ({ day: d.day, hours: d.hours }));
-                  const maxDaily = Math.max(targetLine, ...w.days.map((d) => d.hours));
-                  const yMax = Math.max(10, Math.ceil(Math.max(maxDaily + 1, targetLine + 4)));
+                    w.netBalance >= 0 ? `+$${w.netBalance.toFixed(2)}` : `-$${Math.abs(w.netBalance).toFixed(2)}`;
+                  const budgetLine = w.targetBudget ?? DAILY_BUDGET;
+                  const chartData = w.days.map((d) => ({ day: d.day, spent: d.spent }));
+                  const maxDaily = Math.max(budgetLine, ...w.days.map((d) => d.spent));
+                  const yMax = Math.max(50, Math.ceil(Math.max(maxDaily + 10, budgetLine + 20) / 10) * 10);
                   const chatState = chatByWeek[id];
                   const planText = w.plan.trim();
                   const chatDisabled = !chatState || chatState.loading || chatState.input.trim().length === 0;
@@ -417,7 +381,7 @@ export default function SettingsPage() {
                           {dateStr}
                         </span>
                         <span className="text-slate-500 dark:text-slate-400">
-                          {balanceStr} hrs · {w.points} pts
+                          {balanceStr} · {w.points} pts
                         </span>
                         {isExpanded ? (
                           <ChevronUp className="h-4 w-4 shrink-0 text-slate-400" />
@@ -445,10 +409,11 @@ export default function SettingsPage() {
                                     axisLine={false}
                                     tickLine={false}
                                     tick={{ fill: "#64748b", fontSize: 12 }}
-                                    width={32}
+                                    width={36}
+                                    tickFormatter={(v: number) => `$${v}`}
                                   />
                                   <ReferenceLine
-                                    y={targetLine}
+                                    y={budgetLine}
                                     stroke="#94a3b8"
                                     strokeDasharray="4 4"
                                     strokeWidth={1.25}
@@ -456,56 +421,56 @@ export default function SettingsPage() {
                                   <Tooltip
                                     cursor={{ fill: "rgba(148, 163, 184, 0.18)", radius: 12 }}
                                     wrapperStyle={{ margin: 0 }}
-                                    content={<WeekSleepTooltip />}
+                                    content={<WeekBudgetTooltip />}
                                   />
                                   <Bar
-                                    dataKey="hours"
-                                    fill="#475569"
+                                    dataKey="spent"
+                                    fill="#059669"
                                     radius={[8, 8, 0, 0]}
                                     className="dark:opacity-90"
                                   />
                                 </BarChart>
                               </ResponsiveContainer>
                             </div>
-                              <div className="mt-4 flex flex-wrap items-center justify-around gap-3 text-xs text-slate-600 dark:text-slate-400">
-                                <div className="text-center">
-                                  <div className="text-sm font-semibold text-red-500 dark:text-red-400">
-                                    {w.totalDebt.toFixed(1)}
-                                  </div>
-                                  <div>Debt hrs</div>
+                            <div className="mt-4 flex flex-wrap items-center justify-around gap-3 text-xs text-slate-600 dark:text-slate-400">
+                              <div className="text-center">
+                                <div className="text-sm font-semibold text-red-500 dark:text-red-400">
+                                  ${w.totalOverspend.toFixed(2)}
                                 </div>
-                                <div className="text-center">
-                                  <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                                    {w.totalCredit.toFixed(1)}
-                                  </div>
-                                  <div>Credit hrs</div>
+                                <div>Overspend</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                                  ${w.totalUnderspend.toFixed(2)}
                                 </div>
-                                <div className="text-center">
-                                  <div
-                                    className={`text-sm font-semibold ${
-                                      w.netBalance >= 0
-                                        ? "text-emerald-600 dark:text-emerald-400"
-                                        : "text-red-500 dark:text-red-400"
-                                    }`}
-                                  >
-                                    {balanceStr}
-                                  </div>
-                                  <div>Net hrs</div>
+                                <div>Underspend</div>
+                              </div>
+                              <div className="text-center">
+                                <div
+                                  className={`text-sm font-semibold ${
+                                    w.netBalance >= 0
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : "text-red-500 dark:text-red-400"
+                                  }`}
+                                >
+                                  {balanceStr}
                                 </div>
-                                <div className="text-center">
-                                  <div className="text-sm font-semibold text-amber-600 dark:text-amber-300">
-                                    {w.points}
-                                  </div>
-                                  <div>Coach points</div>
+                                <div>Net</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-300">
+                                  {w.points}
                                 </div>
-                                <div className="text-center">
-                                  <div className="text-sm font-semibold text-slate-600 dark:text-slate-200">
-                                    {targetDisplay}
-                                  </div>
-                                  <div>Target hrs</div>
+                                <div>Coach points</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-sm font-semibold text-slate-600 dark:text-slate-200">
+                                  ${budgetLine}
                                 </div>
+                                <div>Budget/day</div>
                               </div>
                             </div>
+                          </div>
 
                           {planText && (
                             <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300 whitespace-pre-line">
@@ -516,13 +481,11 @@ export default function SettingsPage() {
                           {chatState ? (
                             <div className="rounded-2xl border border-slate-200 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
                               <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                                <MessageCircle className="h-4 w-4 text-amber-500" />
+                                <MessageCircle className="h-4 w-4 text-emerald-500" />
                                 Ask your coach about this week
                               </div>
                               <div
-                                ref={(el) => {
-                                  chatListRefs.current[id] = el;
-                                }}
+                                ref={(el) => { chatListRefs.current[id] = el; }}
                                 className="chat-scroll max-h-60 overflow-y-auto rounded-2xl border border-slate-200/70 bg-white/70 p-3 dark:border-slate-700/60 dark:bg-slate-800/60"
                               >
                                 <div className="flex flex-col gap-2">
@@ -536,8 +499,8 @@ export default function SettingsPage() {
                                         <div
                                           className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-md transition-all duration-200 ${
                                             isUser
-                                              ? "bg-gradient-to-r from-amber-500 to-amber-400 text-amber-50"
-                                              : "border border-amber-100/60 bg-white/85 text-slate-700 dark:border-amber-800/40 dark:bg-slate-900/70 dark:text-slate-200"
+                                              ? "bg-gradient-to-r from-emerald-500 to-emerald-400 text-emerald-50"
+                                              : "border border-emerald-100/60 bg-white/85 text-slate-700 dark:border-emerald-800/40 dark:bg-slate-900/70 dark:text-slate-200"
                                           }`}
                                         >
                                           <div className="space-y-2 text-left">
@@ -550,7 +513,7 @@ export default function SettingsPage() {
                                   {chatState.loading && (
                                     <div className="flex justify-start">
                                       <div className="flex items-center gap-2 rounded-2xl bg-white/70 px-3 py-2 text-xs text-slate-600 shadow-inner dark:bg-slate-800/70 dark:text-slate-300">
-                                        <span className="h-2 w-2 animate-ping rounded-full bg-amber-500"></span>
+                                        <span className="h-2 w-2 animate-ping rounded-full bg-emerald-500"></span>
                                         <span>Coach is typing…</span>
                                       </div>
                                     </div>
@@ -574,13 +537,13 @@ export default function SettingsPage() {
                                   onChange={(event) => handleChatInputChange(id, event.target.value)}
                                   onKeyDown={(event) => handleChatKeyDown(event, id)}
                                   placeholder="Ask a follow-up about this week…"
-                                  className="min-h-[3.25rem] flex-1 resize-none rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm text-slate-700 shadow-inner transition-all duration-200 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300/40 dark:border-slate-700/60 dark:bg-slate-800/70 dark:text-slate-200 dark:focus:border-amber-500"
+                                  className="min-h-[3.25rem] flex-1 resize-none rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm text-slate-700 shadow-inner transition-all duration-200 focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-300/40 dark:border-slate-700/60 dark:bg-slate-800/70 dark:text-slate-200 dark:focus:border-emerald-500"
                                   rows={3}
                                 />
                                 <Button
                                   type="submit"
                                   disabled={chatDisabled}
-                                  className="h-11 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 px-5 text-sm font-semibold text-slate-900 shadow-lg transition-all duration-200 hover:shadow-xl disabled:opacity-60 disabled:shadow-none"
+                                  className="h-11 rounded-2xl bg-gradient-to-r from-emerald-400 to-emerald-500 px-5 text-sm font-semibold text-slate-900 shadow-lg transition-all duration-200 hover:shadow-xl disabled:opacity-60 disabled:shadow-none"
                                 >
                                   {chatState.loading ? "Sending…" : "Send"}
                                 </Button>
@@ -611,14 +574,14 @@ export default function SettingsPage() {
               <CardTitle>Clear cache</CardTitle>
             </div>
             <CardDescription>
-              Remove stored sleep log, analysis cache, week history, and points. This week and all-time points will show 0. App will behave as if you just started.
+              Remove stored spending log, analysis cache, week history, and points. This week and all-time points will show 0. App will behave as if you just started.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <Button
               variant="outline"
               onClick={handleClearCache}
-              className="gap-2 text-amber-700 dark:text-amber-400"
+              className="gap-2 text-emerald-700 dark:text-emerald-400"
             >
               <Trash2 className="h-4 w-4" />
               Clear cache
